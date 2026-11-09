@@ -1242,6 +1242,8 @@ body.leitor .selo{margin-right:0}
         <select id="ct-linha" style="width:200px" onchange="renderContrat()"><option value="">Todas</option></select>
         <label style="font-size:12.5px;font-weight:600;color:var(--tinta2)">Agente financeiro</label>
         <select id="ct-banco" style="width:180px" onchange="renderContrat()"><option value="">Todos</option></select>
+        <label style="font-size:12.5px;font-weight:600;color:var(--tinta2)">Ano da liberação</label>
+        <select id="ct-ano" style="width:120px" onchange="renderContrat()"><option value="">Todos</option></select>
         <span class="hint">os filtros laterais de região e UF também se aplicam aqui</span>
       </div>
       <div class="grid g4" id="ct-kpis"></div>
@@ -2182,14 +2184,16 @@ function renderLiq(){
 
 
 /* ================= CONTRATAÇÕES ================= */
-function ctRows(){
+function ctRows(semAno){
   const lin=document.getElementById('ct-linha').value, ban=document.getElementById('ct-banco').value;
+  const anoSel=semAno?'':(document.getElementById('ct-ano')||{value:''}).value;
   return CONTRAT.rows.filter(a=>{
     const uf=a[2];
     if(S.f.regs.size && !S.f.regs.has(UF_REG[uf])) return false;
     if(S.f.ufs.size && !S.f.ufs.has(uf)) return false;
     if(lin && a[3]!==lin) return false;
     if(ban && a[4]!==ban) return false;
+    if(anoSel && a[0]!==+anoSel) return false;
     return true;
   });
 }
@@ -2201,11 +2205,14 @@ function renderContrat(){
     const bancos=[...new Set(CONTRAT.rows.map(a=>a[4]))].sort();
     document.getElementById('ct-linha').innerHTML='<option value="">Todas</option>'+linhas.map(l=>`<option>${l}</option>`).join('');
     document.getElementById('ct-banco').innerHTML='<option value="">Todos</option>'+bancos.map(b=>`<option value="${b}">${b==='BB'?'Banco do Brasil':b==='BNB'?'Banco do Nordeste':b}</option>`).join('');
+    const anosL=[...new Set(CONTRAT.rows.map(a=>a[0]))].sort((x,y)=>y-x);
+    document.getElementById('ct-ano').innerHTML='<option value="">Todos</option>'+anosL.map(a=>`<option value="${a}">${a}</option>`).join('');
   }
-  const rs=ctRows();
+  const anoSel=document.getElementById('ct-ano').value;
+  const rs=ctRows(), rsAll=ctRows(true);
   const n=rs.reduce((s,a)=>s+a[5],0), vlr=rs.reduce((s,a)=>s+a[6],0), area=rs.reduce((s,a)=>s+a[7],0), dias=rs.reduce((s,a)=>s+a[8],0);
   const anos=[...new Set(rs.map(a=>a[0]))].sort();
-  document.getElementById('ct-sub').textContent=`operações liberadas de crédito fundiário — ${anos.length?anos[0]+' a '+anos[anos.length-1]:''}${filtrosAtivos()?' · recorte filtrado':''}`;
+  document.getElementById('ct-sub').textContent=`operações liberadas de crédito fundiário — ${anoSel?'liberações de '+anoSel:(anos.length?anos[0]+' a '+anos[anos.length-1]:'')}${filtrosAtivos()?' · recorte filtrado':''}`;
   document.getElementById('ct-kpis').innerHTML=
     kpiCard(CORES.verde,'Operações liberadas',fmtCompact(n),'famílias que acessaram a terra pelo Programa','')+
     kpiCard(CORES.verdeMed,'Valor contratado',fmtBRL(vlr),'crédito fundiário liberado','')+
@@ -2213,30 +2220,36 @@ function renderContrat(){
     kpiCard(CORES.azul,'Tempo médio até a liberação',n?fmtInt(dias/n)+' dias':'—','da contratação ao pagamento','');
 
   const porAno={},porAnoLinha={},porMes={},porUF={},porReg={},porBanco={},diasAno={},areaAno={};
-  for(const a of rs){
+  for(const a of rsAll){
     const [ano,mes,uf,lin,ban,q,v,ar,ds]=a;
     porAno[ano]=(porAno[ano]||{n:0,v:0}); porAno[ano].n+=q; porAno[ano].v+=v;
     (porAnoLinha[lin]??(porAnoLinha[lin]={}))[ano]=((porAnoLinha[lin]||{})[ano]||0)+q;
     (porMes[ano]??(porMes[ano]=Array(12).fill(0)))[mes-1]+=q;
-    porUF[uf]=(porUF[uf]||0)+q;
-    const rg=UF_REG[uf]||'—'; porReg[rg]=(porReg[rg]||0)+q;
-    porBanco[ban]=(porBanco[ban]||0)+q;
     diasAno[ano]=(diasAno[ano]||{d:0,n:0}); diasAno[ano].d+=ds; diasAno[ano].n+=q;
     areaAno[ano]=(areaAno[ano]||0)+ar;
   }
+  for(const a of rs){
+    const [ano,mes,uf,lin,ban,q]=a;
+    porUF[uf]=(porUF[uf]||0)+q;
+    const rg=UF_REG[uf]||'—'; porReg[rg]=(porReg[rg]||0)+q;
+    porBanco[ban]=(porBanco[ban]||0)+q;
+  }
+  const anosT=[...new Set(rsAll.map(a=>a[0]))].sort();
   const hist=HIST_PRE2018.filter(h=>h&&h.length>=2);
-  const anosAll=[...hist.map(h=>String(h[0])),...anos.map(String)];
+  const anosAll=[...hist.map(h=>String(h[0])),...anosT.map(String)];
   const CORES_LINHA={'PNCF-Social':CORES.verde,'PNCF-Mais':CORES.verdeMed,'PNCF-Jovem':CORES.terra,'PNCF-Empreendedor':CORES.roxo};
-  const dsLinhas=Object.keys(porAnoLinha).sort().map(lin=>({label:lin,data:[...hist.map(()=>null),...anos.map(a=>porAnoLinha[lin][a]||0)],backgroundColor:CORES_LINHA[lin]||CORES.cinza,stack:'s',borderRadius:3}));
-  if(hist.length) dsLinhas.unshift({label:'Histórico (até 2017)',data:[...hist.map(h=>h[1]),...anos.map(()=>null)],backgroundColor:CORES.cinza,stack:'s',borderRadius:3});
+  const dsLinhas=Object.keys(porAnoLinha).sort().map(lin=>({label:lin,data:[...hist.map(()=>null),...anosT.map(a=>porAnoLinha[lin][a]||0)],backgroundColor:CORES_LINHA[lin]||CORES.cinza,stack:'s',borderRadius:3}));
+  if(hist.length) dsLinhas.unshift({label:'Histórico (até 2017)',data:[...hist.map(h=>h[1]),...anosT.map(()=>null)],backgroundColor:CORES.cinza,stack:'s',borderRadius:3});
   novoChart('ch-ct-ano',{type:'bar',
     data:{labels:anosAll,datasets:[...dsLinhas,
-      {type:'line',label:'Valor (R$ mi)',yAxisID:'y1',data:[...hist.map(h=>h[2]!=null?h[2]/1e6:null),...anos.map(a=>porAno[a].v/1e6)],borderColor:CORES.grafite,borderDash:[6,3],pointRadius:3.5,tension:.25,
+      {type:'line',label:'Valor (R$ mi)',yAxisID:'y1',data:[...hist.map(h=>h[2]!=null?h[2]/1e6:null),...anosT.map(a=>porAno[a].v/1e6)],borderColor:CORES.grafite,borderDash:[6,3],pointRadius:3.5,tension:.25,
        datalabels:{display:false}}]},
     options:{maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:11,font:{size:10.5}}}},
       scales:{x:{stacked:true},y:{stacked:true,ticks:{callback:fmtCompact}},y1:{position:'right',grid:{display:false},ticks:{callback:v=>'R$ '+fmtNum(v,0)+' mi'}}}}});
 
-  const ultAno=anos[anos.length-1], antAno=anos[anos.length-2];
+  const ultAno=anoSel?+anoSel:anosT[anosT.length-1], antAno=porMes[ultAno-1]?ultAno-1:null;
+  const _maxAno=anosT[anosT.length-1], _maxMes=Math.max(...rsAll.filter(x=>x[0]===_maxAno).map(x=>x[1]),0);
+  if(porMes[_maxAno]) porMes[_maxAno]=porMes[_maxAno].map((v,i)=>i<_maxMes?v:null);
   document.getElementById('ct-mes-hint').textContent=antAno?`${ultAno} (verde) comparado a ${antAno} (cinza)`:String(ultAno||'');
   novoChart('ch-ct-mes',{type:'line',
     data:{labels:['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'],datasets:[
@@ -2257,10 +2270,10 @@ function renderContrat(){
   novoChart('ch-ct-banco',{type:'doughnut',data:{labels:bE.map(x=>x[0]==='BB'?'Banco do Brasil':x[0]==='BNB'?'Banco do Nordeste':x[0]),datasets:[{data:bE.map(x=>x[1]),backgroundColor:[CORES.verde,CORES.azul,CORES.terra],borderWidth:2,borderColor:'#fff'}]},
     options:{maintainAspectRatio:false,cutout:'58%',plugins:{legend:{position:'bottom'},datalabels:dpct}}});
 
-  novoChart('ch-ct-dias',{type:'line',data:{labels:anos.map(String),datasets:[{data:anos.map(a=>diasAno[a].n?Math.round(diasAno[a].d/diasAno[a].n):null),borderColor:CORES.azul,backgroundColor:CORES.azul,tension:.3,pointRadius:4,
+  novoChart('ch-ct-dias',{type:'line',data:{labels:anosT.map(String),datasets:[{data:anosT.map(a=>diasAno[a].n?Math.round(diasAno[a].d/diasAno[a].n):null),borderColor:CORES.azul,backgroundColor:CORES.azul,tension:.3,pointRadius:4,
       datalabels:{display:true,align:'top',color:CORES.azul,font:{weight:'700',size:10.5},formatter:v=>v!=null?fmtInt(v):''}}]},
     options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>fmtInt(v)+' d'},suggestedMin:0}}}});
-  novoChart('ch-ct-area',{type:'bar',data:{labels:anos.map(String),datasets:[{data:anos.map(a=>Math.round(areaAno[a])),backgroundColor:CORES.terra,borderRadius:3,
+  novoChart('ch-ct-area',{type:'bar',data:{labels:anosT.map(String),datasets:[{data:anosT.map(a=>Math.round(areaAno[a])),backgroundColor:CORES.terra,borderRadius:3,
       datalabels:{display:true,anchor:'end',align:'end',color:'#17241E',font:{weight:'600',size:10},formatter:v=>fmtCompact(v)}}]},
     options:{maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:fmtCompact},grace:'12%'}}}});
 
